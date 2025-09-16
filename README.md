@@ -1,7 +1,10 @@
 # SOOKSHMA REPO
 
-build.sh script is to be used only for primary building the image on the system. The build.sh script will build multiplatform image - for amd64 and arm64. On all the RPIs use pull.sh  to pull the respective arm64 image.
-libgen.sh used only on the system to generate the custom message compatible micro_ros_arduino library. The library has alredy built and the image pushed and so will be available on the RPIs when image is pulled.
+The build.sh script is to be used only for primary building the image on the system. The build.sh script will build multiplatform image - for amd64 and arm64. On all the RPIs use pull.sh  to pull the respective arm64 image.
+
+Use start.sh to start the container and enter.sh to enter the container in another terminal.
+
+libgen.sh used only on the system to generate the custom message compatible micro_ros_arduino library. The library has been already built and the image pushed, so the library will be available on the RPIs when image is pulled.
 
 ## Requirements for building the multi-platform image on the system
 
