@@ -1,0 +1,140 @@
+# Base: Ubuntu 22.04 + ROS Humble
+FROM ros:humble
+
+RUN apt-get update
+RUN apt-get -y install software-properties-common
+RUN add-apt-repository universe
+RUN apt-get update
+RUN apt-get -y install gcc gfortran git
+RUN apt-get -y install python3-pip python3-serial
+RUN apt-get -y install libsm6 libxext6 libxrender1 libfontconfig1 libgl1 sudo xauth htop udev
+RUN apt-get update --fix-missing
+RUN apt-get -y install libboost-all-dev curl
+RUN apt-get -y install libasio-dev 
+RUN apt-get -y install ros-humble-diagnostic-updater ros-humble-nmea-msgs ros-humble-rtcm-msgs
+RUN apt-get -y install ros-humble-rosbridge-server
+
+# --- System deps & ROS 2 packages in one layer ---
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential gcc gfortran git \
+      python3-pip python3-serial python3-venv \
+      libsm6 libxext6 libxrender1 libfontconfig1 libgl1 \
+      libboost-all-dev libasio-dev \
+      pandoc gdebi-core \
+      ros-humble-diagnostic-updater \
+      ros-humble-nmea-msgs \
+      ros-humble-rtcm-msgs \
+      ros-humble-rosbridge-server \
+      ros-humble-image-transport-plugins \
+      ros-humble-compressed-image-transport \
+      ros-humble-compressed-depth-image-transport \
+      ros-humble-theora-image-transport \
+      ros-humble-point-cloud-transport-plugins \
+      ros-humble-draco-point-cloud-transport \
+      ros-humble-zlib-point-cloud-transport \
+      ros-humble-zstd-point-cloud-transport \
+      ros-humble-xacro \
+      ros-humble-ffmpeg-image-transport \
+      ros-humble-ffmpeg-encoder-decoder \
+      ros-humble-zed-msgs \
+      ros-humble-geographic-msgs \
+      ros-humble-image-transport \
+      ros-humble-point-cloud-transport \
+      ros-humble-robot-localization \
+      ros-humble-backward-ros \
+    && ln -sf /usr/bin/python3 /usr/bin/python \
+    && rm -rf /var/lib/apt/lists/*
+
+# --- Quarto ---
+RUN curl -LO https://quarto.org/download/latest/quarto-linux-amd64.deb \
+    && gdebi --non-interactive quarto-linux-amd64.deb \
+    && rm -f quarto-linux-amd64.deb
+
+# --- Create non-root user once (sudo + dialout) ---
+ARG USERNAME=mavlab
+ENV USERNAME=${USERNAME}
+RUN useradd -m "${USERNAME}" \
+    && echo "${USERNAME}:${USERNAME}" | chpasswd \
+    && usermod --shell /bin/bash "${USERNAME}" \
+    && usermod -aG sudo,dialout "${USERNAME}" \
+    && echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${USERNAME} \
+    && chmod 0440 /etc/sudoers.d/${USERNAME}
+
+USER ${USERNAME}
+WORKDIR /home/${USERNAME}
+
+# --- (Optional) Ngrok; pass token at build or runtime ---
+ARG NGROK_AUTHTOKEN=
+RUN curl -fsSL https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null \
+ && echo "deb https://ngrok-agent.s3.amazonaws.com buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list \
+ && sudo apt-get update \
+ && sudo apt-get install -y --no-install-recommends ngrok \
+ && if [ -n "$NGROK_AUTHTOKEN" ]; then ngrok config add-authtoken "$NGROK_AUTHTOKEN"; fi \
+ && sudo rm -rf /var/lib/apt/lists/*
+
+# --- Python deps ---
+COPY --chown=${USERNAME}:${USERNAME} requirements.txt /home/${USERNAME}/requirements.txt
+RUN pip install --user -r /home/${USERNAME}/requirements.txt
+ENV PATH="/home/${USERNAME}/.local/bin:${PATH}"
+
+# --- Arduino CLI ---
+RUN curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh
+ENV PATH="/home/${USERNAME}/bin:${PATH}"
+
+# Arduino CLI data dir and sketchbook under your repo mount
+ENV ARDUINO_DATA="/home/${USERNAME}/.arduino15"
+RUN arduino-cli config init \
+ && arduino-cli config set directories.data "${ARDUINO_DATA}"
+
+# Install cores and verify
+RUN arduino-cli core update-index \
+ && arduino-cli cache clean \
+ && arduino-cli core install arduino:sam@1.6.12 \
+ && arduino-cli core update-index \
+ && arduino-cli core list \
+ && arduino-cli board listall
+
+# Patch the Arduino SAM platform.txt to support micro-ROS linking
+ENV SAM_VERSION=1.6.12
+ENV SAM_PATH=/home/${USERNAME}/.arduino15/packages/arduino/hardware/sam/${SAM_VERSION}
+RUN curl -fsSL https://raw.githubusercontent.com/micro-ROS/micro_ros_arduino/main/extras/patching_boards/platform_arduinocore_sam.txt \
+    -o ${SAM_PATH}/platform.txt
+
+# Install Arduino libraries (add more as you need)
+RUN arduino-cli lib install Servo
+RUN git clone --depth=1 https://gitlab.com/timwilkinson/FlySkyIBus.git \
+      /home/${USERNAME}/Arduino/libraries/FlySkyIBus
+
+# Installing  custom micro_ros_arduino via zip
+USER ${USERNAME}
+RUN printf "board_manager:\n  additional_urls: []\n\nlibrary:\n  enable_unsafe_install: true\n" \
+  > /home/${USERNAME}/.arduino15/arduino-cli.yaml
+COPY --chown=${USERNAME}:${USERNAME} micro_ros_arduino.zip /tmp/micro_ros_arduino.zip
+RUN arduino-cli --config-file /home/${USERNAME}/.arduino15/arduino-cli.yaml \
+    lib install --zip-path /tmp/micro_ros_arduino.zip \
+ && rm /tmp/micro_ros_arduino.zip
+
+
+# --- Node via NVM (user-local) + localtunnel ---
+ENV NVM_DIR="/home/${USERNAME}/.nvm"    
+ENV NODE_VERSION="20.17.0"
+RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.1/install.sh | bash \
+ && . "$NVM_DIR/nvm.sh" \
+ && nvm install $NODE_VERSION \
+ && nvm alias default $NODE_VERSION \
+ && nvm use default \
+ && npm install -g npm@latest localtunnel
+ENV PATH="${NVM_DIR}/versions/node/v${NODE_VERSION}/bin:${PATH}"
+
+# --- ROS convenience in bashrc + your aliases (non-failing if ws missing) ---
+RUN echo 'source /opt/ros/humble/setup.bash' >> /home/${USERNAME}/.bashrc \
+ && echo 'if [ -f /workspaces/mavlab/ros2_ws/install/setup.bash ]; then source /workspaces/mavlab/ros2_ws/install/setup.bash; fi' >> /home/${USERNAME}/.bashrc \
+ && echo "alias sros2='source /opt/ros/humble/setup.bash && if [ -f /workspaces/mavlab/ros2_ws/install/setup.bash ]; then source /workspaces/mavlab/ros2_ws/install/setup.bash; fi'" >> /home/${USERNAME}/.bashrc \
+ && echo "alias sbg='sros2 && ros2 launch sbg_driver sbg_device_launch.py'" >> /home/${USERNAME}/.bashrc \
+ && echo "alias uwb='sros2 && ros2 run uwb_driver uwb'" >> /home/${USERNAME}/.bashrc \
+ && echo "alias gnc='sros2 && ros2 run gnc gnc'" >> /home/${USERNAME}/.bashrc \
+ && echo "alias mavsim='sros2 && ros2 run mav_simulator simulate'" >> /home/${USERNAME}/.bashrc \
+ && echo "alias ardusimple='sros2 && ros2 launch ublox_gps ublox_gps_node-launch.py'" >> /home/${USERNAME}/.bashrc
+
+# (Optional) Ports
+EXPOSE 9000 9001 9002 9003

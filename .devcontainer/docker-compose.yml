@@ -1,0 +1,32 @@
+services:
+  sookshma:
+    image: aatmaj9/sookshma:3.0
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sookshma_dev
+    working_dir: /workspace/sookshma
+    user: "mavlab"
+
+    volumes:
+      - ..:/workspace/sookshma
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - /dev/serial/by-id:/dev/serial/by-id:ro
+      - /dev/bus/usb:/dev/bus/usb              
+
+    group_add:
+      - dialout
+    device_cgroup_rules:
+      - 'c 166:* rmw'   # ttyACM*
+      - 'c 188:* rmw'   # ttyUSB*
+
+    privileged: true
+    network_mode: host
+    runtime: nvidia
+    shm_size: "2g"
+    stdin_open: true
+    tty: true
+    
+    environment:
+      - DISPLAY=${DISPLAY}
+      - ROS_DOMAIN_ID=42

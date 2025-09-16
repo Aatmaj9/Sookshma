@@ -1,0 +1,11 @@
+arduino-cli core update-index
+arduino-cli core install arduino:sam
+
+sudo rm -rf ~/Arduino/libraries/micro_ros_arduino
+cd ~/Arduino/libraries
+git clone -b humble https://github.com/micro-ROS/micro_ros_arduino.git
+cd -
+sudo cp -r ros2_ws/src/interfaces ~/Arduino/libraries/micro_ros_arduino/extras/library_generation/extra_packages/
+cd ~/Arduino/libraries/micro_ros_arduino
+docker run -it --rm -v $(pwd):/project --env MICROROS_LIBRARY_FOLDER=extras microros/micro_ros_static_library_builder:humble -p cortex_m3
+sudo chown -R $(whoami) ~/Arduino/libraries/micro_ros_arduino
