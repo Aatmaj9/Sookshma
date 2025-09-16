@@ -1,23 +1,30 @@
-# MAKARA simulator + GNC modules
+# SOOKSHMA REPO
 
-## Starting the simulator
+build.sh script is to be used only for primary building the image on the system. The build.sh script will build multiplatform image - for amd64 and arm64. On all the RPIs use pull.sh  to pull the respective arm64 image.
+libgen.sh used only on the system to generate the custom message compatible micro_ros_arduino library. The library has alredy built and the image pushed and so will be available on the RPIs when image is pulled.
 
-It is presumed that you have docker on your desktop and hence the instructions to install docker are omitted here. Before you can begin, we need to build the docker image needed for the simulator to run. The docker image can be build with the following command executed at the root of the repository that you have cloned.
+## Requirements for libgen on the system
 
-```
-$ ./ros2_devdocker.sh
-```
-Once the build is complete, you can invoke the simulator with the command (again to be run at the root folder of the repository)
+Arduino CLI
 
 ```
-$ ./ros2_simulator.sh
-```
-You will see that this starts the simulator and it continuously prints out the states of the vehicle to the terminal. At the start you should see that the propeller and rudder commands must be zero and the vehicle will be at rest. However, you should see the time get incremented. 
+cd ~
+curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh
 
-## Starting your GNC package
+echo 'export PATH=$PATH:$HOME/bin' >> ~/.bashrc
+source ~/.bashrc
 
-Once the simulator is up and running, open another terminal and navigate to the root folder of the repository. Now execute the following command to start your GNC block to interact with the simulator.
+arduino-cli core update-index
+arduino-cli cache clean
+arduino-cli core install arduino:sam@1.6.12
+```
+
+Microros Arduino Library
 
 ```
-$ ./ros2_gnc.sh
+mkdir -p ~/Arduino/libraries
+cd ~/Arduino/libraries
+git clone -b humble https://github.com/micro-ROS/micro_ros_arduino.git
+
 ```
+Now run the libgen.sh script to generate the custom library.
