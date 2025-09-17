@@ -63,6 +63,15 @@ RUN useradd -m "${USERNAME}" \
     && echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${USERNAME} \
     && chmod 0440 /etc/sudoers.d/${USERNAME}
 
+# --- arm64-only: system toolchain/uploader (Due needs bossac) ---
+ARG TARGETARCH
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+      apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-arm-none-eabi bossa-cli && \
+      rm -rf /var/lib/apt/lists/*; \
+    fi
+    
+
 USER ${USERNAME}
 WORKDIR /home/${USERNAME}
 
@@ -75,24 +84,53 @@ ENV PATH="/home/${USERNAME}/.local/bin:${PATH}"
 RUN curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh
 ENV PATH="/home/${USERNAME}/bin:${PATH}"
 
-# Arduino CLI data dir and sketchbook under your repo mount
+# --- ARM64: provide toolchain/uploader under expected "versioned" paths BEFORE core handling ---
+ARG TARGETARCH
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+      set -eux; \
+      # system toolchain/uploader already installed earlier: gcc-arm-none-eabi, bossa-cli
+      TOOLS_ROOT="$HOME/.arduino15/packages/arduino/tools"; \
+      mkdir -p "$TOOLS_ROOT/arm-none-eabi-gcc/4.8.3-2014q1/bin"; \
+      for f in /usr/bin/arm-none-eabi-*; do \
+        ln -sf "$f" "$TOOLS_ROOT/arm-none-eabi-gcc/4.8.3-2014q1/bin/$(basename "$f")"; \
+      done; \
+      mkdir -p "$TOOLS_ROOT/bossac/1.6.1" "$TOOLS_ROOT/bossac/1.7.0"; \
+      ln -sf /usr/bin/bossac "$TOOLS_ROOT/bossac/1.6.1/bossac"; \
+      ln -sf /usr/bin/bossac "$TOOLS_ROOT/bossac/1.7.0/bossac"; \
+    fi
+
+# Arduino CLI data dir
 ENV ARDUINO_DATA="/home/${USERNAME}/.arduino15"
 RUN arduino-cli config init \
  && arduino-cli config set directories.data "${ARDUINO_DATA}"
 
-# Install cores and verify
-RUN arduino-cli core update-index \
- && arduino-cli cache clean \
- && arduino-cli core install arduino:sam@1.6.12 \
- && arduino-cli core update-index \
- && arduino-cli core list \
- && arduino-cli board listall
-
-# Patch the Arduino SAM platform.txt to support micro-ROS linking
+# --- Install the SAM core ---
+# On amd64: use the normal CLI installer (downloads tools fine)
+# On arm64: vendor the core files manually to avoid bossac/tool download step
+# On arm64: vendor the core files (no bossac/tool downloads)
 ENV SAM_VERSION=1.6.12
 ENV SAM_PATH=/home/${USERNAME}/.arduino15/packages/arduino/hardware/sam/${SAM_VERSION}
+
+RUN arduino-cli core update-index && arduino-cli cache clean && \
+    if [ "$TARGETARCH" = "arm64" ]; then \
+      set -eux; \
+      mkdir -p "$(dirname "${SAM_PATH}")"; \
+      # Clone the repo (default branch; no tag needed)
+      git clone --depth=1 https://github.com/arduino/ArduinoCore-sam.git /tmp/sam; \
+      mkdir -p "${SAM_PATH}"; \
+      cp -a /tmp/sam/. "${SAM_PATH}/"; \
+      rm -rf /tmp/sam; \
+    else \
+      arduino-cli core install arduino:sam@${SAM_VERSION}; \
+    fi
+
 RUN curl -fsSL https://raw.githubusercontent.com/micro-ROS/micro_ros_arduino/main/extras/patching_boards/platform_arduinocore_sam.txt \
     -o ${SAM_PATH}/platform.txt
+
+    # Verify (both arches). On arm64 this will list the core because it exists under ARDUINO_DATA.
+RUN arduino-cli core update-index \
+ && arduino-cli core list \
+ && arduino-cli board listall | head -n 50
 
 # Install Arduino libraries (add more as you need)
 RUN arduino-cli lib install Servo

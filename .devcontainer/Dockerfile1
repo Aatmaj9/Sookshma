@@ -63,6 +63,18 @@ RUN useradd -m "${USERNAME}" \
     && echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${USERNAME} \
     && chmod 0440 /etc/sudoers.d/${USERNAME}
 
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+      echo "Installing ARM embedded toolchain and bossa-cli..."; \
+      apt-get update && apt-get install -y --no-install-recommends \
+        gcc-arm-none-eabi \
+        binutils-arm-none-eabi \
+        libnewlib-arm-none-eabi \
+        bossa-cli \
+      && rm -rf /var/lib/apt/lists/*; \
+    else \
+      echo "Skipping ARM toolchain install (only needed for arm64)"; \
+    fi    
+
 USER ${USERNAME}
 WORKDIR /home/${USERNAME}
 
@@ -80,15 +92,39 @@ ENV ARDUINO_DATA="/home/${USERNAME}/.arduino15"
 RUN arduino-cli config init \
  && arduino-cli config set directories.data "${ARDUINO_DATA}"
 
-# Install cores and verify
-RUN arduino-cli core update-index \
- && arduino-cli cache clean \
- && arduino-cli core install arduino:sam@1.6.12 \
- && arduino-cli core update-index \
- && arduino-cli core list \
- && arduino-cli board listall
+# Install cores and verify ( Different sam installation for both amd and arm)
+ARG TARGETARCH
+ENV ARDUINO_DATA="/home/${USERNAME}/.arduino15"
+RUN arduino-cli core update-index && arduino-cli cache clean && \
+    if [ "$TARGETARCH" = "amd64" ]; then \
+        echo ">>> amd64: installing arduino:sam@1.6.12 via arduino-cli"; \
+        arduino-cli core install arduino:sam@1.6.12; \
+    elif [ "$TARGETARCH" = "arm64" ]; then \
+        echo ">>> arm64: vendoring ArduinoCore-sam 1.6.12 and fixing bossac paths"; \
+        set -eux; \
+        SAM_VER="1.6.12"; \
+        SAM_DST="$ARDUINO_DATA/packages/arduino/hardware/sam/$SAM_VER"; \
+        mkdir -p "$(dirname "$SAM_DST")"; \
+        git clone --depth=1 --branch "$SAM_VER" https://github.com/arduino/ArduinoCore-sam.git /tmp/sam; \
+        mkdir -p "$SAM_DST"; \
+        cp -a /tmp/sam/. "$SAM_DST/"; \
+        rm -rf /tmp/sam; \
+        { \
+          [ -f "$SAM_DST/programmers.txt" ] && sed -i \
+            -e 's|^compiler\.path=.*|compiler.path=/usr/bin/|' \
+            -e 's|^tools\.bossac\.path=.*|tools.bossac.path=/usr/bin|' \
+            "$SAM_DST/programmers.txt" || true; \
+        }; \
+        arduino-cli core install arduino:samd; \
+    else \
+        echo ">>> unknown TARGETARCH=$TARGETARCH; defaulting to amd64 behavior"; \
+        arduino-cli core install arduino:sam@1.6.12; \
+    fi && \
+    arduino-cli core update-index && \
+    arduino-cli core list && \
+    arduino-cli board listall
 
-# Patch the Arduino SAM platform.txt to support micro-ROS linking
+    # Patch the Arduino SAM platform.txt to support micro-ROS linking
 ENV SAM_VERSION=1.6.12
 ENV SAM_PATH=/home/${USERNAME}/.arduino15/packages/arduino/hardware/sam/${SAM_VERSION}
 RUN curl -fsSL https://raw.githubusercontent.com/micro-ROS/micro_ros_arduino/main/extras/patching_boards/platform_arduinocore_sam.txt \
