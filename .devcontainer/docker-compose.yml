@@ -1,9 +1,9 @@
 services:
   sookshma:
-    image: aatmaj9/sookshma:3.0
+    image: aatmaj9/sookshma:2.0
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile1
     container_name: sookshma_dev
     working_dir: /workspace/sookshma
     user: "mavlab"

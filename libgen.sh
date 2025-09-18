@@ -1,6 +1,3 @@
-arduino-cli core update-index
-arduino-cli core install arduino:sam
-
 sudo rm -rf ~/Arduino/libraries/micro_ros_arduino
 cd ~/Arduino/libraries
 git clone -b humble https://github.com/micro-ROS/micro_ros_arduino.git

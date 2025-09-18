@@ -102,10 +102,10 @@ RUN arduino-cli core update-index && arduino-cli cache clean && \
     elif [ "$TARGETARCH" = "arm64" ]; then \
         echo ">>> arm64: vendoring ArduinoCore-sam 1.6.12 and fixing bossac paths"; \
         set -eux; \
-        SAM_VER="1.6.12"; \
-        SAM_DST="$ARDUINO_DATA/packages/arduino/hardware/sam/$SAM_VER"; \
+        SAM_FOL="1.6.12"; \
+        SAM_DST="$ARDUINO_DATA/packages/arduino/hardware/sam/$SAM_FOL"; \
         mkdir -p "$(dirname "$SAM_DST")"; \
-        git clone --depth=1 --branch "$SAM_VER" https://github.com/arduino/ArduinoCore-sam.git /tmp/sam; \
+        git clone --depth=1 https://github.com/arduino/ArduinoCore-sam.git /tmp/sam; \
         mkdir -p "$SAM_DST"; \
         cp -a /tmp/sam/. "$SAM_DST/"; \
         rm -rf /tmp/sam; \
@@ -114,6 +114,12 @@ RUN arduino-cli core update-index && arduino-cli cache clean && \
             -e 's|^compiler\.path=.*|compiler.path=/usr/bin/|' \
             -e 's|^tools\.bossac\.path=.*|tools.bossac.path=/usr/bin|' \
             "$SAM_DST/programmers.txt" || true; \
+        }; \
+        { \
+          [ -f "$SAM_DST/platform.txt" ] && sed -i \
+            -e 's|^compiler\.path=.*|compiler.path=/usr/bin/|' \
+            -e 's|^tools\.bossac\.path=.*|tools.bossac.path=/usr/bin|' \
+            "$SAM_DST/platform.txt" || true; \
         }; \
         arduino-cli core install arduino:samd; \
     else \
@@ -124,11 +130,13 @@ RUN arduino-cli core update-index && arduino-cli cache clean && \
     arduino-cli core list && \
     arduino-cli board listall
 
-    # Patch the Arduino SAM platform.txt to support micro-ROS linking
+# Patch the Arduino SAM platform.txt to support micro-ROS linking (only for amd)
 ENV SAM_VERSION=1.6.12
 ENV SAM_PATH=/home/${USERNAME}/.arduino15/packages/arduino/hardware/sam/${SAM_VERSION}
-RUN curl -fsSL https://raw.githubusercontent.com/micro-ROS/micro_ros_arduino/main/extras/patching_boards/platform_arduinocore_sam.txt \
-    -o ${SAM_PATH}/platform.txt
+RUN if [ "$TARGETARCH" = "amd64" ]; then \
+      curl -fsSL https://raw.githubusercontent.com/micro-ROS/micro_ros_arduino/main/extras/patching_boards/platform_arduinocore_sam.txt \
+    -o ${SAM_PATH}/platform.txt \
+    fi
 
 # Install Arduino libraries (add more as you need)
 RUN arduino-cli lib install Servo
@@ -139,11 +147,27 @@ RUN git clone --depth=1 https://gitlab.com/timwilkinson/FlySkyIBus.git \
 USER ${USERNAME}
 RUN printf "board_manager:\n  additional_urls: []\n\nlibrary:\n  enable_unsafe_install: true\n" \
   > /home/${USERNAME}/.arduino15/arduino-cli.yaml
-COPY --chown=${USERNAME}:${USERNAME} micro_ros_arduino.zip /tmp/micro_ros_arduino.zip
-RUN arduino-cli --config-file /home/${USERNAME}/.arduino15/arduino-cli.yaml \
-    lib install --zip-path /tmp/micro_ros_arduino.zip \
- && rm /tmp/micro_ros_arduino.zip
 
+# Different custom microros libraries for arm and amd
+COPY --chown=${USERNAME}:${USERNAME} micro_ros_arduino(amd).zip /tmp/micro_ros_arduino.zip
+
+RUN if [ "$TARGETARCH" = "amd64" ]; then \
+      arduino-cli --config-file /home/${USERNAME}/.arduino15/arduino-cli.yaml \
+        lib install --zip-path /tmp/micro_ros_arduino.zip; \
+    else \
+      echo "Skipping micro_ros_arduino.zip on $TARGETARCH"; \
+    fi && \
+    rm -f /tmp/micro_ros_arduino.zip
+
+COPY --chown=${USERNAME}:${USERNAME} micro_ros_arduino(arm).zip /tmp/micro_ros_arduino.zip
+
+RUN if [ "$TARGETARCH" = "amd64" ]; then \
+      arduino-cli --config-file /home/${USERNAME}/.arduino15/arduino-cli.yaml \
+        lib install --zip-path /tmp/micro_ros_arduino.zip; \
+    else \
+      echo "Skipping micro_ros_arduino.zip on $TARGETARCH"; \
+    fi && \
+    rm -f /tmp/micro_ros_arduino.zip
 
 # --- Node via NVM (user-local) + localtunnel ---
 ENV NVM_DIR="/home/${USERNAME}/.nvm"    
