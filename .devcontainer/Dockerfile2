@@ -45,6 +45,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && ln -sf /usr/bin/python3 /usr/bin/python \
     && rm -rf /var/lib/apt/lists/*
 
+# --- arm64-only: system toolchain/uploader (Due needs bossac) ---
+ARG TARGETARCH
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+      apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-arm-none-eabi bossa-cli && \
+      rm -rf /var/lib/apt/lists/*; \
+    fi
+
 # --- Quarto ---
 ARG TARGETARCH
 RUN curl -LO "https://quarto.org/download/latest/quarto-linux-${TARGETARCH}.deb" \
@@ -52,6 +60,7 @@ RUN curl -LO "https://quarto.org/download/latest/quarto-linux-${TARGETARCH}.deb"
     && gdebi --non-interactive "quarto-linux-${TARGETARCH}.deb" \
     && rm -f "quarto-linux-${TARGETARCH}.deb"
 
+#-----------------------------------------------------------------------------------All basic installations is done---------------------------------------------------------------------------
 
 # --- Create non-root user once (sudo + dialout) ---
 ARG USERNAME=mavlab
@@ -63,89 +72,89 @@ RUN useradd -m "${USERNAME}" \
     && echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${USERNAME} \
     && chmod 0440 /etc/sudoers.d/${USERNAME}
 
-# --- arm64-only: system toolchain/uploader (Due needs bossac) ---
-ARG TARGETARCH
-RUN if [ "$TARGETARCH" = "arm64" ]; then \
-      apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-arm-none-eabi bossa-cli && \
-      rm -rf /var/lib/apt/lists/*; \
-    fi
-    
-
 USER ${USERNAME}
 WORKDIR /home/${USERNAME}
 
-# --- Python deps ---
+#---------------------------------------------------------------------------------Python Dependencies and  Arduino CLI---------------------------------------------------------------------
+
+# --- Python deps from requirements.txt -----
 COPY --chown=${USERNAME}:${USERNAME} requirements.txt /home/${USERNAME}/requirements.txt
 RUN pip install --user -r /home/${USERNAME}/requirements.txt
 ENV PATH="/home/${USERNAME}/.local/bin:${PATH}"
 
-# --- Arduino CLI ---
+# --- Arduino CLI Setup---
 RUN curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh
 ENV PATH="/home/${USERNAME}/bin:${PATH}"
-
-# --- ARM64: provide toolchain/uploader under expected "versioned" paths BEFORE core handling ---
-ARG TARGETARCH
-RUN if [ "$TARGETARCH" = "arm64" ]; then \
-      set -eux; \
-      # system toolchain/uploader already installed earlier: gcc-arm-none-eabi, bossa-cli
-      TOOLS_ROOT="$HOME/.arduino15/packages/arduino/tools"; \
-      mkdir -p "$TOOLS_ROOT/arm-none-eabi-gcc/4.8.3-2014q1/bin"; \
-      for f in /usr/bin/arm-none-eabi-*; do \
-        ln -sf "$f" "$TOOLS_ROOT/arm-none-eabi-gcc/4.8.3-2014q1/bin/$(basename "$f")"; \
-      done; \
-      mkdir -p "$TOOLS_ROOT/bossac/1.6.1" "$TOOLS_ROOT/bossac/1.7.0"; \
-      ln -sf /usr/bin/bossac "$TOOLS_ROOT/bossac/1.6.1/bossac"; \
-      ln -sf /usr/bin/bossac "$TOOLS_ROOT/bossac/1.7.0/bossac"; \
-    fi
-
-# Arduino CLI data dir
 ENV ARDUINO_DATA="/home/${USERNAME}/.arduino15"
 RUN arduino-cli config init \
  && arduino-cli config set directories.data "${ARDUINO_DATA}"
+RUN arduino-cli core update-index && arduino-cli cache clean
 
-# --- Install the SAM core ---
-# On amd64: use the normal CLI installer (downloads tools fine)
-# On arm64: vendor the core files manually to avoid bossac/tool download step
-# On arm64: vendor the core files (no bossac/tool downloads)
-ENV SAM_VERSION=1.6.12
-ENV SAM_PATH=/home/${USERNAME}/.arduino15/packages/arduino/hardware/sam/${SAM_VERSION}
+# ----------------------------------------------------------------------------------Arduino Installations on AMD ----------------------------------------------------------------------------------
 
-RUN arduino-cli core update-index && arduino-cli cache clean && \
-    if [ "$TARGETARCH" = "arm64" ]; then \
-      set -eux; \
-      mkdir -p "$(dirname "${SAM_PATH}")"; \
-      # Clone the repo (default branch; no tag needed)
-      git clone --depth=1 https://github.com/arduino/ArduinoCore-sam.git /tmp/sam; \
-      mkdir -p "${SAM_PATH}"; \
-      cp -a /tmp/sam/. "${SAM_PATH}/"; \
-      rm -rf /tmp/sam; \
-    else \
-      arduino-cli core install arduino:sam@${SAM_VERSION}; \
+# This RUN block only executes if the target architecture is 'AMD64'
+ARG TARGETARCH
+RUN if [ "$TARGETARCH" = "amd64" ]; then \
+        echo "--- Executing AMD-specific Arduino setup ---" && \
+        # Install the standard Arduino SAM core
+        arduino-cli core update-index && \
+        arduino-cli cache clean && \
+        arduino-cli core install arduino:sam@1.6.12 && \
+        # Define a shell variable for the path
+        SAM_AMD_PATH="/home/${USERNAME}/.arduino15/packages/arduino/hardware/sam/1.6.12" && \
+        # Patch the platform.txt file
+        curl -fsSL https://raw.githubusercontent.com/micro-ROS/micro_ros_arduino/main/extras/patching_boards/platform_arduinocore_sam.txt -o ${SAM_AMD_PATH}/platform.txt && \
+        # Install libraries
+        arduino-cli lib install Servo && \
+        git clone --depth=1 https://gitlab.com/timwilkinson/FlySkyIBus.git /home/${USERNAME}/Arduino/libraries/FlySkyIBus; \
     fi
 
-RUN curl -fsSL https://raw.githubusercontent.com/micro-ROS/micro_ros_arduino/main/extras/patching_boards/platform_arduinocore_sam.txt \
-    -o ${SAM_PATH}/platform.txt
+COPY --chown=${USERNAME}:${USERNAME} micro_ros_arduino_amd.zip /tmp/micro_ros_arduino.zip
 
-    # Verify (both arches). On arm64 this will list the core because it exists under ARDUINO_DATA.
-RUN arduino-cli core update-index \
- && arduino-cli core list \
- && arduino-cli board listall | head -n 50
+#Install the pre-built custom micro_ros_arduino for AMD
+RUN if [ "$TARGETARCH" = "amd64" ]; then \
+        echo "--- Executing AMD-specific user setup ---" && \
+        # Create arduino-cli config
+        printf "board_manager:\n  additional_urls: []\n\nlibrary:\n  enable_unsafe_install: true\n" > /home/${USERNAME}/.arduino15/arduino-cli.yaml && \
+        # Install the zipped micro-ROS library
+        arduino-cli --config-file /home/${USERNAME}/.arduino15/arduino-cli.yaml lib install --zip-path /tmp/micro_ros_arduino.zip && \
+        rm /tmp/micro_ros_arduino.zip; \
+    fi
+# -----------------------------------------------------------------------------------Arduino Installations on ARM----------------------------------------------------------------------------------
 
-# Install Arduino libraries (add more as you need)
-RUN arduino-cli lib install Servo
-RUN git clone --depth=1 https://gitlab.com/timwilkinson/FlySkyIBus.git \
-      /home/${USERNAME}/Arduino/libraries/FlySkyIBus
+# This RUN block only executes if the target architecture is 'ARM64'
+ARG TARGETARCH
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+        echo "--- Executing ARM-specific Arduino setup ---" && \
+        # Install and configure the core
+        arduino-cli core update-index && \
+        arduino-cli cache clean && \
+        arduino-cli core update-index --additional-urls https://per1234.github.io/ArduinoCore-sam/package_per1234_samarm64_index.json && \
+        export ARDUINO_BOARD_MANAGER_ADDITIONAL_URLS=https://per1234.github.io/ArduinoCore-sam/package_per1234_samarm64_index.json && \
+        arduino-cli core install per1234:sam && \
+        # Define a shell variable for the path
+        SAM_ARM_PATH="/home/${USERNAME}/.arduino15/packages/per1234/hardware/sam/1.6.11-arm64" && \
+        # Patch the platform.txt file
+        curl -fsSL https://raw.githubusercontent.com/micro-ROS/micro_ros_arduino/main/extras/patching_boards/platform_arduinocore_sam.txt -o ${SAM_ARM_PATH}/platform.txt && \
+        sed -i 's/-4.8.3-2014q1././g' ${SAM_ARM_PATH}/platform.txt && \
+        # Install basic libraries
+        arduino-cli lib install Servo && \
+        git clone --depth=1 https://gitlab.com/timwilkinson/FlySkyIBus.git /home/${USERNAME}/Arduino/libraries/FlySkyIBus; \
+    fi
 
-# Installing  custom micro_ros_arduino via zip
-USER ${USERNAME}
-RUN printf "board_manager:\n  additional_urls: []\n\nlibrary:\n  enable_unsafe_install: true\n" \
-  > /home/${USERNAME}/.arduino15/arduino-cli.yaml
-COPY --chown=${USERNAME}:${USERNAME} micro_ros_arduino.zip /tmp/micro_ros_arduino.zip
-RUN arduino-cli --config-file /home/${USERNAME}/.arduino15/arduino-cli.yaml \
-    lib install --zip-path /tmp/micro_ros_arduino.zip \
- && rm /tmp/micro_ros_arduino.zip
+COPY --chown=${USERNAME}:${USERNAME} micro_ros_arduino_arm.zip /tmp/micro_ros_arduino.zip
 
+#Install the pre-built custom micro_ros_arduino for ARM
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+        echo "--- Executing ARM-specific user setup ---" && \
+        # Create arduino-cli config
+        printf "board_manager:\n  additional_urls: []\n\nlibrary:\n  enable_unsafe_install: true\n" > /home/${USERNAME}/.arduino15/arduino-cli.yaml && \
+        # Install the zipped micro-ROS library
+        arduino-cli --config-file /home/${USERNAME}/.arduino15/arduino-cli.yaml lib install --zip-path /tmp/micro_ros_arduino.zip && \
+        rm /tmp/micro_ros_arduino.zip; \
+    fi
+
+# --------------------------------------------------------------------------------------Some Other Installations--------------------------------------------------------------------------------
 
 # --- Node via NVM (user-local) + localtunnel ---
 ENV NVM_DIR="/home/${USERNAME}/.nvm"    
@@ -158,7 +167,8 @@ RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.1/install.sh | b
  && npm install -g npm@latest localtunnel
 ENV PATH="${NVM_DIR}/versions/node/v${NODE_VERSION}/bin:${PATH}"
 
-# --- ROS convenience in bashrc + your aliases (non-failing if ws missing) ---
+#--------------------------------------------------------------------------------------------ROS-Convinience------------------------------------------------------------------------------------
+
 RUN echo 'source /opt/ros/humble/setup.bash' >> /home/${USERNAME}/.bashrc \
  && echo 'if [ -f /workspaces/mavlab/ros2_ws/install/setup.bash ]; then source /workspaces/mavlab/ros2_ws/install/setup.bash; fi' >> /home/${USERNAME}/.bashrc \
  && echo "alias sros2='source /opt/ros/humble/setup.bash && if [ -f /workspaces/mavlab/ros2_ws/install/setup.bash ]; then source /workspaces/mavlab/ros2_ws/install/setup.bash; fi'" >> /home/${USERNAME}/.bashrc \

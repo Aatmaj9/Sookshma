@@ -1,6 +1,6 @@
 services:
   sookshma:
-    image: aatmaj9/sookshma:2.0
+    image: aatmaj9/sookshma:5.0
     build:
       context: .
       dockerfile: Dockerfile1
@@ -11,7 +11,7 @@ services:
     volumes:
       - ..:/workspace/sookshma
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
-      - /dev/serial/by-id:/dev/serial/by-id:ro
+      - /dev:/dev
       - /dev/bus/usb:/dev/bus/usb              
 
     group_add:

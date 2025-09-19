@@ -115,12 +115,6 @@ RUN arduino-cli core update-index && arduino-cli cache clean && \
             -e 's|^tools\.bossac\.path=.*|tools.bossac.path=/usr/bin|' \
             "$SAM_DST/programmers.txt" || true; \
         }; \
-        { \
-          [ -f "$SAM_DST/platform.txt" ] && sed -i \
-            -e 's|^compiler\.path=.*|compiler.path=/usr/bin/|' \
-            -e 's|^tools\.bossac\.path=.*|tools.bossac.path=/usr/bin|' \
-            "$SAM_DST/platform.txt" || true; \
-        }; \
         arduino-cli core install arduino:samd; \
     else \
         echo ">>> unknown TARGETARCH=$TARGETARCH; defaulting to amd64 behavior"; \

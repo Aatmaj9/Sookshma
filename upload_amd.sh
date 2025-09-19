@@ -63,5 +63,5 @@ echo "🛠️  Compiling..."
 arduino-cli compile --fqbn "$FQBN" .
 
 echo "🚀 Uploading..."
-arduino-cli upload -p "$PORT" --fqbn "$FQBN" .
+arduino-cli upload -v -p "$PORT" --fqbn "$FQBN" .
 echo "✅ Upload complete."
