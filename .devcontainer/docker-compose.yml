@@ -22,7 +22,6 @@ services:
 
     privileged: true
     network_mode: host
-    runtime: nvidia
     shm_size: "2g"
     stdin_open: true
     tty: true
