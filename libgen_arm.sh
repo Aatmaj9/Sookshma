@@ -1,9 +1,5 @@
 sudo cp -r ros2_ws/src/interfaces ~/Arduino/libraries/micro_ros_arduino/extras/library_generation/extra_packages/
-sudo chown -R $(whoami) ~/Arduino/libraries/micro_ros_arduino
 
-sudo rm -rf ~/Arduino/libraries/micro_ros_arduino
-cd ~/Arduino/libraries
-git clone -b humble https://github.com/micro-ROS/micro_ros_arduino.git
 cd ~/Arduino/libraries/micro_ros_arduino
 sed -i 's/4_8-2014q1/7-2017-q4-major/g' extras/library_generation/library_generation.sh
 export ARDUINO_PATH=[~/.arduino15/packages/per1234]
