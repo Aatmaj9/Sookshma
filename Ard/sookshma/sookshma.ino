@@ -7,6 +7,7 @@
 #include <rclc/rclc.h>
 #include <rclc/executor.h>
 #include <interfaces/msg/actuator.h>  // generated Actuator.msg header
+#include <std_msgs/msg/bool.h>        // for heartbeat
 
 // ================= Pins & Constants =================
 const int LEFT_THRUSTER_PIN = 12;
@@ -50,12 +51,32 @@ int heartbeatStage_rf = 0;
 // ================= micro-ROS handles =================
 rcl_node_t node;
 rcl_subscription_t actuator_sub;
+rcl_subscription_t heartbeat_sub;
 rclc_executor_t executor;
 rcl_allocator_t allocator;
 rclc_support_t support;
 
 interfaces__msg__Actuator last_actuator_msg;
 bool actuator_msg_received = false;
+std_msgs__msg__Bool last_heartbeat_msg;
+
+// ================= micro-ROS publisher =================
+rcl_publisher_t actuator_pub;
+interfaces__msg__Actuator feedback_msg;
+
+// Static buffers for feedback_msg
+double actuator_values_buffer[2];
+rosidl_runtime_c__String actuator_names_buffer[2];
+char name0[10];
+char name1[10];
+
+// ================= Fail-safe state =================
+unsigned long last_actuator_msg_time = 0;
+const unsigned long ACTUATOR_TIMEOUT_MS = 1000;  // 1 second watchdog
+
+unsigned long last_heartbeat_time = 0;
+const unsigned long HEARTBEAT_TIMEOUT_MS = 2000; // 2 seconds for heartbeat
+bool heartbeat_received = false;
 
 // ================= Helper Functions =================
 bool readSwitch(byte channelInput, bool defaultValue) {
@@ -78,12 +99,18 @@ int applyDeadband(float value) {
   return value;
 }
 
-// ================= micro-ROS Callback =================
+// ================= micro-ROS Callbacks =================
 void actuator_callback(const void * msgin) {
   const interfaces__msg__Actuator * msg = (const interfaces__msg__Actuator *)msgin;
   last_actuator_msg = *msg;
   actuator_msg_received = true;
-  // For now, do nothing with actuator_values
+  last_actuator_msg_time = millis();   // record reception time
+}
+
+void heartbeat_callback(const void * msgin) {
+  (void)msgin; // not using Bool value, only presence
+  heartbeat_received = true;
+  last_heartbeat_time = millis();
 }
 
 // ================= Setup =================
@@ -111,14 +138,58 @@ void setup() {
   allocator = rcl_get_default_allocator();
   rclc_support_init(&support, 0, NULL, &allocator);
   rclc_node_init_default(&node, "thruster_node", "", &support);
+
+  // Subscriptions
   rclc_subscription_init_default(
     &actuator_sub,
     &node,
     ROSIDL_GET_MSG_TYPE_SUPPORT(interfaces, msg, Actuator),
-    "actuator_cmd"   // topic name
+    "actuator_cmd"
   );
-  rclc_executor_init(&executor, &support.context, 1, &allocator);
+  rclc_subscription_init_default(
+    &heartbeat_sub,
+    &node,
+    ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Bool),
+    "heartbeat"
+  );
+
+  // Executor
+  rclc_executor_init(&executor, &support.context, 2, &allocator);
   rclc_executor_add_subscription(&executor, &actuator_sub, &last_actuator_msg, &actuator_callback, ON_NEW_DATA);
+  rclc_executor_add_subscription(&executor, &heartbeat_sub, &last_heartbeat_msg, &heartbeat_callback, ON_NEW_DATA);
+
+  // Publisher: actuator feedback
+  rclc_publisher_init_default(
+    &actuator_pub,
+    &node,
+    ROSIDL_GET_MSG_TYPE_SUPPORT(interfaces, msg, Actuator),
+    "actuator_feedback"
+  );
+
+  // ==== Static allocation of feedback_msg ====
+  feedback_msg.actuator_values.data = actuator_values_buffer;
+  feedback_msg.actuator_values.size = 2;
+  feedback_msg.actuator_values.capacity = 2;
+
+  feedback_msg.actuator_names.data = actuator_names_buffer;
+  feedback_msg.actuator_names.size = 2;
+  feedback_msg.actuator_names.capacity = 2;
+
+  // Assign names once (static char buffers)
+  strcpy(name0, "th_stbd");
+  feedback_msg.actuator_names.data[0].data = name0;
+  feedback_msg.actuator_names.data[0].size = strlen(name0);
+  feedback_msg.actuator_names.data[0].capacity = sizeof(name0);
+
+  strcpy(name1, "th_port");
+  feedback_msg.actuator_names.data[1].data = name1;
+  feedback_msg.actuator_names.data[1].size = strlen(name1);
+  feedback_msg.actuator_names.data[1].capacity = sizeof(name1);
+
+  // Leave covariance empty
+  feedback_msg.covariance.data = NULL;
+  feedback_msg.covariance.size = 0;
+  feedback_msg.covariance.capacity = 0;
 }
 
 // ================= RF Manual Control =================
@@ -132,8 +203,12 @@ void Rf_control() {
     heartbeatStage_rf = (heartbeatStage_rf + 1) % 2;
   }
 
-  int servoA_int = 0;
-  int servoB_int = 0;
+  int servoA_int = NEUTRAL_SIGNAL;
+  int servoB_int = NEUTRAL_SIGNAL;
+
+  // Normalized values [-1,1] to be published
+  double th_stbd_norm = 0.0;
+  double th_port_norm = 0.0;
 
   int Ch2val = readChannel(1, MAX_REVERSE, MAX_FORWARD, NEUTRAL_SIGNAL);
   int Ch4val = readChannel(3, MAX_REVERSE, MAX_FORWARD, NEUTRAL_SIGNAL);
@@ -148,33 +223,76 @@ void Rf_control() {
 
     servoA_int = constrain(throttle_pwm + steer_pwm, MAX_REVERSE_AUTO - radius_val, MAX_FORWARD_AUTO + radius_val);
     servoB_int = constrain(throttle_pwm - steer_pwm, MAX_REVERSE_AUTO - radius_val, MAX_FORWARD_AUTO + radius_val);
-
-    leftThruster.writeMicroseconds(servoB_int);
-    rightThruster.writeMicroseconds(servoA_int);
-  } else {
-    leftThruster.writeMicroseconds(NEUTRAL_SIGNAL);
-    rightThruster.writeMicroseconds(NEUTRAL_SIGNAL);
   }
+
+  leftThruster.writeMicroseconds(servoB_int);
+  rightThruster.writeMicroseconds(servoA_int);
+
+  // === Compute normalized values for feedback ===
+  th_stbd_norm = (servoA_int - NEUTRAL_SIGNAL) / (double)(MAX_FORWARD_AUTO - NEUTRAL_SIGNAL);
+  th_port_norm = (servoB_int - NEUTRAL_SIGNAL) / (double)(MAX_FORWARD_AUTO - NEUTRAL_SIGNAL);
+
+  th_stbd_norm = constrain(th_stbd_norm, -1.0, 1.0);
+  th_port_norm = constrain(th_port_norm, -1.0, 1.0);
+
+  // === Publish RF feedback ===
+  feedback_msg.actuator_values.data[0] = th_stbd_norm;
+  feedback_msg.actuator_values.data[1] = th_port_norm;
+  feedback_msg.header.stamp.sec = millis() / 1000;
+  feedback_msg.header.stamp.nanosec = (millis() % 1000) * 1000000;
+  rcl_publish(&actuator_pub, &feedback_msg, NULL);
 }
 
 // ================= AUTO Mode =================
 void autoControl() {
-  // Heartbeat
-  unsigned long currentTime = millis();
-  if ((heartbeatStage == 0 && currentTime - lastRelayToggle >= 900) ||
-      (heartbeatStage == 1 && currentTime - lastRelayToggle >= 200) ||
-      (heartbeatStage == 2 && currentTime - lastRelayToggle >= 300) ||
-      (heartbeatStage == 3 && currentTime - lastRelayToggle >= 100) ||
-      (heartbeatStage == 4 && currentTime - lastRelayToggle >= 300) ||
-      (heartbeatStage == 5 && currentTime - lastRelayToggle >= 100)) {
-    relayState = !relayState;
-    digitalWrite(RELAY_PIN, relayState);
-    lastRelayToggle = currentTime;
-    heartbeatStage = (heartbeatStage + 1) % 6;
+  rclc_executor_spin_some(&executor, RCL_MS_TO_NS(10));
+
+  static double th_stbd_norm = 0.0;
+  static double th_port_norm = 0.0;
+
+  // Apply new actuator values when message arrives
+  if (actuator_msg_received) {
+    actuator_msg_received = false;
+    th_stbd_norm = 0.0;
+    th_port_norm = 0.0;
+
+    for (size_t i = 0; i < last_actuator_msg.actuator_names.size; i++) {
+      const char *name = last_actuator_msg.actuator_names.data[i].data;
+      double value = last_actuator_msg.actuator_values.data[i];
+      if (strcmp(name, "th_stbd") == 0) {
+        th_stbd_norm = value;
+      } else if (strcmp(name, "th_port") == 0) {
+        th_port_norm = value;
+      }
+    }
   }
 
-  // Spin ROS executor to process Actuator messages
-  rclc_executor_spin_some(&executor, RCL_MS_TO_NS(10));
+  // === Fail-safe conditions ===
+  bool timeout = (millis() - last_actuator_msg_time > ACTUATOR_TIMEOUT_MS);
+  bool hb_timeout = (millis() - last_heartbeat_time > HEARTBEAT_TIMEOUT_MS);
+
+  if (timeout || hb_timeout) {
+    // No recent command or heartbeat → neutral thrusters
+    th_stbd_norm = 0.0;
+    th_port_norm = 0.0;
+  }
+
+  // Map normalized [-1,1] to PWM
+  int stbd_pwm = NEUTRAL_SIGNAL + (int)(th_stbd_norm * (MAX_FORWARD_AUTO - NEUTRAL_SIGNAL));
+  int port_pwm = NEUTRAL_SIGNAL + (int)(th_port_norm * (MAX_FORWARD_AUTO - NEUTRAL_SIGNAL));
+
+  stbd_pwm = constrain(stbd_pwm, MAX_REVERSE_AUTO, MAX_FORWARD_AUTO);
+  port_pwm = constrain(port_pwm, MAX_REVERSE_AUTO, MAX_FORWARD_AUTO);
+
+  rightThruster.writeMicroseconds(stbd_pwm);
+  leftThruster.writeMicroseconds(port_pwm);
+
+  // Always publish last known (or neutral) values
+  feedback_msg.actuator_values.data[0] = th_stbd_norm;
+  feedback_msg.actuator_values.data[1] = th_port_norm;
+  feedback_msg.header.stamp.sec = millis() / 1000;
+  feedback_msg.header.stamp.nanosec = (millis() % 1000) * 1000000;
+  rcl_publish(&actuator_pub, &feedback_msg, NULL);
 }
 
 // ================= Loop =================
@@ -186,6 +304,7 @@ void loop() {
 
   IBus.loop();
   int Ch5val = readSwitch(MODE_CH, false);
+  Serial.println(Ch5val);
 
   if (Ch5val == 1) {
     autoMode = true;

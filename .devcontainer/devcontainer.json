@@ -1,7 +1,7 @@
 {
-    "name": "Ship Simulator Dev Container",
+    "name": "Sookshma Dev Container",
     "build": {
-        "dockerfile": "Dockerfile_ros2",
+        "dockerfile": "Dockerfile2",
         "context": ".."
     },
     "runArgs": ["--privileged","--network=host"],
