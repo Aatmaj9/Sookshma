@@ -1,6 +1,6 @@
 services:
   sookshma:
-    image: aatmaj9/sookshma:5.0
+    image: aatmaj9/sookshma:6.0
     build:
       context: .
       dockerfile: Dockerfile1

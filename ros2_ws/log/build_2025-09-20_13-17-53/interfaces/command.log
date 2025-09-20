@@ -1,0 +1,6 @@
+Invoking command in '/home/aatmaj/Sookshma/ros2_ws/build/interfaces': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake /home/aatmaj/Sookshma/ros2_ws/src/interfaces -DCMAKE_INSTALL_PREFIX=/home/aatmaj/Sookshma/ros2_ws/install/interfaces
+Invoked command in '/home/aatmaj/Sookshma/ros2_ws/build/interfaces' returned '0': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake /home/aatmaj/Sookshma/ros2_ws/src/interfaces -DCMAKE_INSTALL_PREFIX=/home/aatmaj/Sookshma/ros2_ws/install/interfaces
+Invoking command in '/home/aatmaj/Sookshma/ros2_ws/build/interfaces': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake --build /home/aatmaj/Sookshma/ros2_ws/build/interfaces -- -j24 -l24
+Invoked command in '/home/aatmaj/Sookshma/ros2_ws/build/interfaces' returned '0': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake --build /home/aatmaj/Sookshma/ros2_ws/build/interfaces -- -j24 -l24
+Invoking command in '/home/aatmaj/Sookshma/ros2_ws/build/interfaces': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake --install /home/aatmaj/Sookshma/ros2_ws/build/interfaces
+Invoked command in '/home/aatmaj/Sookshma/ros2_ws/build/interfaces' returned '0': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake --install /home/aatmaj/Sookshma/ros2_ws/build/interfaces

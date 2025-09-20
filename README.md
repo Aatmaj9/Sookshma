@@ -58,7 +58,15 @@ arduino-cli core install arduino:sam@1.6.12
 ```
 
 Then run the libgen_amd.sh script.
-Zip the new newly generated micro_ros_arduino library as micro_ros_srduino_amd.zip inside this repo
+
+Inside ~/Arduino/libraries/micro_ros_arduino run this -
+
+```
+strings src/cortex-m3/libmicroros.a | grep "GCC: ("
+```
+Check the compiler - for amd it should should show version 4.8.3 
+
+Zip the new newly generated micro_ros_arduino library as micro_ros_srduino_amd.zip inside this repo. Delete the library and clone it again for generating the library for arm.
 
 ### Now lets do library generation for ARM
 
@@ -71,6 +79,12 @@ arduino-cli core install per1234:sam
 
 ```
 Then run the libgen_arm.sh script.
-Zip the new newly generated micro_ros_arduino library as micro_ros_srduino_arm.zip inside this repo
+
+```
+strings src/cortex-m3/libmicroros.a | grep "GCC: ("
+```
+Check the compiler - for arm it should should show version 7-2017-q4-major 
+
+Zip the new newly generated micro_ros_arduino library as micro_ros_srduino_arm.zip inside this repo.
 
 
