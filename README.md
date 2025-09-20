@@ -1,5 +1,6 @@
 # SOOKSHMA REPO
 
+
 ## About the files
 
 The build.sh script is to be used only for primary building the image on the system. The build.sh script will build multiplatform image - for amd64 and arm64. On all the RPIs use pull.sh  to pull the respective arm64 image.
@@ -22,9 +23,9 @@ docker run --privileged --rm tonistiigi/binfmt --install all
 docker buildx inspect --bootstrap
 
 ```
-## Requirements for libgen on the system
+## Requirements for libgen on the main system
 
-Arduino
+Arduino CLI
 
 ```
 cd ~
@@ -35,12 +36,8 @@ source ~/.bashrc
 
 arduino-cli core update-index
 arduino-cli cache clean
-arduino-cli core update-index --additional-urls https://per1234.github.io/ArduinoCore-sam/package_per1234_samarm64_index.json
-export ARDUINO_BOARD_MANAGER_ADDITIONAL_URLS=https://per1234.github.io/ArduinoCore-sam/package_per1234_samarm64_index.json
-arduino-cli core install per1234:sam
 
 ```
-
 Microros Arduino Library
 
 ```
@@ -50,3 +47,30 @@ git clone -b humble https://github.com/micro-ROS/micro_ros_arduino.git
 
 ```
 Now run the libgen.sh script to generate the custom library.
+
+### First lets do library generation for AMD
+
+Install on the system -
+```
+arduino-cli core update-index
+arduino-cli core install arduino:sam@1.6.12
+
+```
+
+Then run the libgen_amd.sh script.
+Zip the new newly generated micro_ros_arduino library as micro_ros_srduino_amd.zip inside this repo
+
+### Now lets do library generation for ARM
+
+Install on the system -
+
+```
+arduino-cli core update-index --additional-urls https://per1234.github.io/ArduinoCore-sam/package_per1234_samarm64_index.json
+export ARDUINO_BOARD_MANAGER_ADDITIONAL_URLS=https://per1234.github.io/ArduinoCore-sam/package_per1234_samarm64_index.json
+arduino-cli core install per1234:sam
+
+```
+Then run the libgen_arm.sh script.
+Zip the new newly generated micro_ros_arduino library as micro_ros_srduino_arm.zip inside this repo
+
+
