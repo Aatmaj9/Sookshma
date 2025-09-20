@@ -5,22 +5,17 @@ RUN apt-get update
 RUN apt-get -y install software-properties-common
 RUN add-apt-repository universe
 RUN apt-get update
-RUN apt-get -y install gcc gfortran git
 RUN apt-get -y install python3-pip python3-serial
-RUN apt-get -y install libsm6 libxext6 libxrender1 libfontconfig1 libgl1 sudo xauth htop udev
+RUN apt-get -y install sudo xauth htop udev zip unzip curl
 RUN apt-get update --fix-missing
-RUN apt-get -y install libboost-all-dev curl
-RUN apt-get -y install libasio-dev 
-RUN apt-get -y install ros-humble-diagnostic-updater ros-humble-nmea-msgs ros-humble-rtcm-msgs
-RUN apt-get -y install ros-humble-rosbridge-server
+RUN apt-get -y install libboost-all-dev libasio-dev 
 
 # --- System deps & ROS 2 packages in one layer ---
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential gcc gfortran git \
       python3-pip python3-serial python3-venv \
-      libsm6 libxext6 libxrender1 libfontconfig1 libgl1 \
-      libboost-all-dev libasio-dev \
-      pandoc gdebi-core \
+      libsm6 libxext6 libxrender1 libfontconfig1 libgl1 libboost-all-dev libasio-dev \
+      gdebi-core \
       ros-humble-diagnostic-updater \
       ros-humble-nmea-msgs \
       ros-humble-rtcm-msgs \
@@ -52,14 +47,7 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
         gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-arm-none-eabi bossa-cli && \
       rm -rf /var/lib/apt/lists/*; \
     fi
-
-# --- Quarto ---
-ARG TARGETARCH
-RUN curl -LO "https://quarto.org/download/latest/quarto-linux-${TARGETARCH}.deb" \
-    && apt-get update && apt-get install -y gdebi-core \
-    && gdebi --non-interactive "quarto-linux-${TARGETARCH}.deb" \
-    && rm -f "quarto-linux-${TARGETARCH}.deb"
-
+    
 #-----------------------------------------------------------------------------------All basic installations is done---------------------------------------------------------------------------
 
 # --- Create non-root user once (sudo + dialout) ---
