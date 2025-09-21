@@ -134,7 +134,7 @@ void setup() {
   digitalWrite(LED_PIN, LOW);  // setup complete
 
   // === micro-ROS init ===
-  set_microros_transports();
+  set_microros_serial_transports(Serial);
   allocator = rcl_get_default_allocator();
   rclc_support_init(&support, 0, NULL, &allocator);
   rclc_node_init_default(&node, "thruster_node", "", &support);

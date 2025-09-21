@@ -3,7 +3,7 @@ docker buildx build \
   --pull \
   --no-cache \
   -f .devcontainer/Dockerfile2 \
-  -t aatmaj9/sookshma:7.0 \
+  -t aatmaj9/sookshma:8.0 \
   --push \
   .
 
