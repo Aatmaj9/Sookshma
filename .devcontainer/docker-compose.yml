@@ -25,7 +25,5 @@ services:
     shm_size: "2g"
     stdin_open: true
     tty: true
-    
     environment:
       - DISPLAY=${DISPLAY}
-      - ROS_DOMAIN_ID=42
