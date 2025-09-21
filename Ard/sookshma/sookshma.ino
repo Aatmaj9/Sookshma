@@ -115,7 +115,7 @@ void heartbeat_callback(const void * msgin) {
 
 // ================= Setup =================
 void setup() {
-  Serial.begin(115200);
+  Serial1.begin(115200);
   pinMode(RELAY_PIN, OUTPUT);
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, HIGH);  // setup in progress
@@ -134,7 +134,8 @@ void setup() {
   digitalWrite(LED_PIN, LOW);  // setup complete
 
   // === micro-ROS init ===
-  set_microros_serial_transports(Serial);
+  Serial.begin(115200);
+  set_microros_transports();  
   allocator = rcl_get_default_allocator();
   rclc_support_init(&support, 0, NULL, &allocator);
   rclc_node_init_default(&node, "thruster_node", "", &support);
@@ -241,6 +242,7 @@ void Rf_control() {
   feedback_msg.header.stamp.sec = millis() / 1000;
   feedback_msg.header.stamp.nanosec = (millis() % 1000) * 1000000;
   rcl_publish(&actuator_pub, &feedback_msg, NULL);
+  // Serial1.println("RF Control Active");
 }
 
 // ================= AUTO Mode =================
@@ -293,6 +295,7 @@ void autoControl() {
   feedback_msg.header.stamp.sec = millis() / 1000;
   feedback_msg.header.stamp.nanosec = (millis() % 1000) * 1000000;
   rcl_publish(&actuator_pub, &feedback_msg, NULL);
+  // Serial1.println("Auto Control Active");
 }
 
 // ================= Loop =================
@@ -304,9 +307,9 @@ void loop() {
 
   IBus.loop();
   int Ch5val = readSwitch(MODE_CH, false);
-  Serial.println(Ch5val);
+  // Serial1.println(Ch5val);
 
-  if (Ch5val == 1) {
+  if (Ch5val == 1) {  
     autoMode = true;
     autoControl();
   } else {
