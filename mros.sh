@@ -1,4 +1,4 @@
-docker run -d --privileged --rm \
+docker run --privileged \
   --name microros_agent \
   --net=host \
   --volume="/dev":"/dev" \

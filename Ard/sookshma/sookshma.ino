@@ -3,11 +3,12 @@
 
 // === micro-ROS includes ===
 #include <micro_ros_arduino.h>
+#include <rmw_microros/rmw_microros.h>     // rmw_uros_ping_agent()
 #include <rcl/rcl.h>
 #include <rclc/rclc.h>
 #include <rclc/executor.h>
-#include <interfaces/msg/actuator.h>  // generated Actuator.msg header
-#include <std_msgs/msg/bool.h>        // for heartbeat
+#include <interfaces/msg/actuator.h>       // generated Actuator.msg header
+#include <std_msgs/msg/bool.h>             // for heartbeat
 
 // ================= Pins & Constants =================
 const int LEFT_THRUSTER_PIN = 12;
@@ -78,6 +79,10 @@ unsigned long last_heartbeat_time = 0;
 const unsigned long HEARTBEAT_TIMEOUT_MS = 2000; // 2 seconds for heartbeat
 bool heartbeat_received = false;
 
+// ================= Connection state (auto-(re)connect) =================
+bool mr_connected = false;
+unsigned long last_ping_ms = 0;
+
 // ================= Helper Functions =================
 bool readSwitch(byte channelInput, bool defaultValue) {
   int intDefaultValue = (defaultValue) ? 100 : 0;
@@ -92,7 +97,7 @@ int readChannel(byte channelInput, int minLimit, int maxLimit, int defaultValue)
   return map(ch, 1000, 2000, minLimit, maxLimit);
 }
 
-int applyDeadband(float value) {
+int applyDeadband(int value) {
   if (abs(value - NEUTRAL_SIGNAL) < SIGNAL_DEADBAND) {
     return NEUTRAL_SIGNAL;
   }
@@ -113,61 +118,74 @@ void heartbeat_callback(const void * msgin) {
   last_heartbeat_time = millis();
 }
 
+// ================= micro-ROS (create/destroy) =================
+bool create_microros_entities() {
+  allocator = rcl_get_default_allocator();
+
+  if (rclc_support_init(&support, 0, NULL, &allocator) != RCL_RET_OK) return false;
+
+  if (rclc_node_init_default(&node, "thruster_node", "", &support) != RCL_RET_OK) return false;
+
+  if (rclc_subscription_init_default(
+        &actuator_sub, &node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(interfaces, msg, Actuator),
+        "actuator_cmd") != RCL_RET_OK) return false;
+
+  if (rclc_subscription_init_default(
+        &heartbeat_sub, &node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Bool),
+        "heartbeat") != RCL_RET_OK) return false;
+
+  if (rclc_publisher_init_default(
+        &actuator_pub, &node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(interfaces, msg, Actuator),
+        "actuator_feedback") != RCL_RET_OK) return false;
+
+  if (rclc_executor_init(&executor, &support.context, 2, &allocator) != RCL_RET_OK) return false;
+  rclc_executor_add_subscription(&executor, &actuator_sub, &last_actuator_msg, &actuator_callback, ON_NEW_DATA);
+  rclc_executor_add_subscription(&executor, &heartbeat_sub, &last_heartbeat_msg, &heartbeat_callback, ON_NEW_DATA);
+
+  mr_connected = true;
+  digitalWrite(LED_PIN, HIGH);   // connected indicator
+  return true;
+}
+
+void destroy_microros_entities() {
+  rcl_publisher_fini(&actuator_pub, &node);
+  rcl_subscription_fini(&actuator_sub, &node);
+  rcl_subscription_fini(&heartbeat_sub, &node);
+  rclc_executor_fini(&executor);
+  rcl_node_fini(&node);
+  rclc_support_fini(&support);
+  mr_connected = false;
+  digitalWrite(LED_PIN, LOW);    // disconnected indicator
+}
+
 // ================= Setup =================
 void setup() {
-  Serial1.begin(115200);
+  // Debug/aux UARTs (optional)
+  Serial1.begin(115200);       // your debug prints if needed
+  Serial2.begin(115200);       // FlySky iBUS RX
+  IBus.begin(Serial2);
+
   pinMode(RELAY_PIN, OUTPUT);
   pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, HIGH);  // setup in progress
-
-  Serial2.begin(115200);
-  IBus.begin(Serial2);
+  digitalWrite(LED_PIN, LOW);  // off until connected
 
   // Initialize thrusters
   leftThruster.attach(LEFT_THRUSTER_PIN);
   rightThruster.attach(RIGHT_THRUSTER_PIN);
-
   leftThruster.writeMicroseconds(NEUTRAL_SIGNAL);
   rightThruster.writeMicroseconds(NEUTRAL_SIGNAL);
-
   delay(2000);  // allow ESCs to init
-  digitalWrite(LED_PIN, LOW);  // setup complete
 
-  // === micro-ROS init ===
-  Serial.begin(115200);
-  set_microros_transports();  
-  allocator = rcl_get_default_allocator();
-  rclc_support_init(&support, 0, NULL, &allocator);
-  rclc_node_init_default(&node, "thruster_node", "", &support);
+  // === micro-ROS transport only (no entities in setup) ===
+  Serial.begin(115200);                       // Programming Port baud
+  set_microros_transports();     // Use Programming Port
+  // If you switch to Native Port, use:
+  // set_microros_serial_transports(SerialUSB);
 
-  // Subscriptions
-  rclc_subscription_init_default(
-    &actuator_sub,
-    &node,
-    ROSIDL_GET_MSG_TYPE_SUPPORT(interfaces, msg, Actuator),
-    "actuator_cmd"
-  );
-  rclc_subscription_init_default(
-    &heartbeat_sub,
-    &node,
-    ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Bool),
-    "heartbeat"
-  );
-
-  // Executor
-  rclc_executor_init(&executor, &support.context, 2, &allocator);
-  rclc_executor_add_subscription(&executor, &actuator_sub, &last_actuator_msg, &actuator_callback, ON_NEW_DATA);
-  rclc_executor_add_subscription(&executor, &heartbeat_sub, &last_heartbeat_msg, &heartbeat_callback, ON_NEW_DATA);
-
-  // Publisher: actuator feedback
-  rclc_publisher_init_default(
-    &actuator_pub,
-    &node,
-    ROSIDL_GET_MSG_TYPE_SUPPORT(interfaces, msg, Actuator),
-    "actuator_feedback"
-  );
-
-  // ==== Static allocation of feedback_msg ====
+  // ==== Static allocation of feedback_msg (safe even before connection) ====
   feedback_msg.actuator_values.data = actuator_values_buffer;
   feedback_msg.actuator_values.size = 2;
   feedback_msg.actuator_values.capacity = 2;
@@ -176,7 +194,6 @@ void setup() {
   feedback_msg.actuator_names.size = 2;
   feedback_msg.actuator_names.capacity = 2;
 
-  // Assign names once (static char buffers)
   strcpy(name0, "th_stbd");
   feedback_msg.actuator_names.data[0].data = name0;
   feedback_msg.actuator_names.data[0].size = strlen(name0);
@@ -211,16 +228,20 @@ void Rf_control() {
   double th_stbd_norm = 0.0;
   double th_port_norm = 0.0;
 
-  int Ch2val = readChannel(1, MAX_REVERSE, MAX_FORWARD, NEUTRAL_SIGNAL);
-  int Ch4val = readChannel(3, MAX_REVERSE, MAX_FORWARD, NEUTRAL_SIGNAL);
+  int Ch2val = readChannel(THROTTLE_CH, MAX_REVERSE, MAX_FORWARD, NEUTRAL_SIGNAL);
+  int Ch4val = readChannel(IPR_CH,      MAX_REVERSE, MAX_FORWARD, NEUTRAL_SIGNAL);
 
-  if (applyDeadband(Ch2val)) {
+  // Apply deadband properly (overwrite value, not boolean-test)
+  Ch2val = applyDeadband(Ch2val);
+  Ch4val = applyDeadband(Ch4val);
+
+  if (Ch2val != NEUTRAL_SIGNAL) {
     float steering = (Ch4val - NEUTRAL_SIGNAL) / (float)(MAX_FORWARD - NEUTRAL_SIGNAL);
-    int throttle_pwm = Ch2val;
+    int   throttle_pwm = Ch2val;
 
-    float turn_radius = 0.5;
-    int radius_val = turn_radius * (MAX_FORWARD_AUTO - NEUTRAL_SIGNAL);
-    int steer_pwm = steering * radius_val;
+    float turn_radius = 0.5f;
+    int radius_val = (int)(turn_radius * (MAX_FORWARD_AUTO - NEUTRAL_SIGNAL));
+    int steer_pwm  = (int)(steering * radius_val);
 
     servoA_int = constrain(throttle_pwm + steer_pwm, MAX_REVERSE_AUTO - radius_val, MAX_FORWARD_AUTO + radius_val);
     servoB_int = constrain(throttle_pwm - steer_pwm, MAX_REVERSE_AUTO - radius_val, MAX_FORWARD_AUTO + radius_val);
@@ -236,18 +257,25 @@ void Rf_control() {
   th_stbd_norm = constrain(th_stbd_norm, -1.0, 1.0);
   th_port_norm = constrain(th_port_norm, -1.0, 1.0);
 
-  // === Publish RF feedback ===
-  feedback_msg.actuator_values.data[0] = th_stbd_norm;
-  feedback_msg.actuator_values.data[1] = th_port_norm;
-  feedback_msg.header.stamp.sec = millis() / 1000;
-  feedback_msg.header.stamp.nanosec = (millis() % 1000) * 1000000;
-  rcl_publish(&actuator_pub, &feedback_msg, NULL);
+  // === Publish RF feedback (only if connected) ===
+  if (mr_connected) {
+    feedback_msg.actuator_values.data[0] = th_stbd_norm;
+    feedback_msg.actuator_values.data[1] = th_port_norm;
+    feedback_msg.header.stamp.sec = millis() / 1000;
+    feedback_msg.header.stamp.nanosec = (millis() % 1000) * 1000000;
+    rcl_publish(&actuator_pub, &feedback_msg, NULL);
+
+    // light spin so callbacks (e.g., heartbeat) still run in RF
+    rclc_executor_spin_some(&executor, RCL_MS_TO_NS(1));
+  }
   // Serial1.println("RF Control Active");
 }
 
 // ================= AUTO Mode =================
 void autoControl() {
-  rclc_executor_spin_some(&executor, RCL_MS_TO_NS(10));
+  if (mr_connected) {
+    rclc_executor_spin_some(&executor, RCL_MS_TO_NS(10));
+  }
 
   static double th_stbd_norm = 0.0;
   static double th_port_norm = 0.0;
@@ -289,17 +317,32 @@ void autoControl() {
   rightThruster.writeMicroseconds(stbd_pwm);
   leftThruster.writeMicroseconds(port_pwm);
 
-  // Always publish last known (or neutral) values
-  feedback_msg.actuator_values.data[0] = th_stbd_norm;
-  feedback_msg.actuator_values.data[1] = th_port_norm;
-  feedback_msg.header.stamp.sec = millis() / 1000;
-  feedback_msg.header.stamp.nanosec = (millis() % 1000) * 1000000;
-  rcl_publish(&actuator_pub, &feedback_msg, NULL);
+  // Always publish last known (or neutral) values (only if connected)
+  if (mr_connected) {
+    feedback_msg.actuator_values.data[0] = th_stbd_norm;
+    feedback_msg.actuator_values.data[1] = th_port_norm;
+    feedback_msg.header.stamp.sec = millis() / 1000;
+    feedback_msg.header.stamp.nanosec = (millis() % 1000) * 1000000;
+    rcl_publish(&actuator_pub, &feedback_msg, NULL);
+  }
   // Serial1.println("Auto Control Active");
 }
 
 // ================= Loop =================
 void loop() {
+  // --- Non-blocking agent ping (~5 Hz) & connect/disconnect handling ---
+  if (millis() - last_ping_ms > 200) {
+    last_ping_ms = millis();
+    bool agent_up = (rmw_uros_ping_agent(100, 1) == RMW_RET_OK);
+
+    if (!mr_connected && agent_up) {
+      create_microros_entities();    // bring up node/pubs/subs/executor
+    } else if (mr_connected && !agent_up) {
+      destroy_microros_entities();   // cleanly tear down; we'll re-create later
+    }
+  }
+
+  // --- Rest of your logic ---
   myTime = millis() / 1000;
   if (myTime - lastTime > 1) {
     lastTime = myTime;
@@ -309,7 +352,7 @@ void loop() {
   int Ch5val = readSwitch(MODE_CH, false);
   // Serial1.println(Ch5val);
 
-  if (Ch5val == 1) {  
+  if (Ch5val == 1) {
     autoMode = true;
     autoControl();
   } else {
