@@ -5,11 +5,11 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: sookshma_dev
-    working_dir: /workspace/sookshma
+    working_dir: /workspaces/mavlab
     user: "mavlab"
 
     volumes:
-      - ..:/workspace/sookshma
+      - ..:/workspaces/mavlab
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - /dev:/dev
       - /dev/bus/usb:/dev/bus/usb              
