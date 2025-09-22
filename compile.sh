@@ -2,7 +2,7 @@
 set -e
 
 # Path to the sketch
-SKETCH_PATH="./Ard/sookshma"
+SKETCH_PATH="./arduino/sookshma"
 
 if [ "$(uname -m)" = "x86_64" ]; then
     arduino-cli compile --fqbn arduino:sam:arduino_due_x_dbg "$SKETCH_PATH"
