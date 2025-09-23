@@ -3,5 +3,4 @@ set -e
 
 COMPOSE_FILE=".devcontainer/docker-compose.yml"
 
-docker compose -f .devcontainer/docker-compose.yml up -d sookshma
-docker compose -f .devcontainer/docker-compose.yml exec sookshma bash
+docker compose -f "$COMPOSE_FILE" run --rm sookshma bash
