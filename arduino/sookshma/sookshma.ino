@@ -13,7 +13,7 @@
 // ================= Pins & Constants =================
 const int LEFT_THRUSTER_PIN = 12;
 const int RIGHT_THRUSTER_PIN = 13;
-const int LED_PIN = LED_BUILTIN;
+const int LED_PIN = 4;
 const int RELAY_PIN = 3;
 
 const int NEUTRAL_SIGNAL = 1500;
@@ -298,9 +298,6 @@ void Rf_control() {
 
   servoA_int = constrain(throttle_pwm + steer_pwm, MAX_REVERSE_AUTO - radius_val, MAX_FORWARD_AUTO + radius_val);
   servoB_int = constrain(throttle_pwm - steer_pwm, MAX_REVERSE_AUTO - radius_val, MAX_FORWARD_AUTO + radius_val);
-  
-  servoA_int = constrain(servoA_int, MAX_REVERSE, MAX_FORWARD);
-  servoB_int = constrain(servoB_int, MAX_REVERSE, MAX_FORWARD);
 
   leftThruster.writeMicroseconds(servoB_int);
   rightThruster.writeMicroseconds(servoA_int);
