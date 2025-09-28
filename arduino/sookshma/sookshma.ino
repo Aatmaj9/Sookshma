@@ -19,8 +19,8 @@ const int RELAY_PIN = 3;
 const int NEUTRAL_SIGNAL = 1500;
 const int MAX_FORWARD = 1650;
 const int MAX_REVERSE = 1350;
-const int MAX_FORWARD_AUTO = 1650;
-const int MAX_REVERSE_AUTO = 1350;
+const int MAX_FORWARD_AUTO = 1600;
+const int MAX_REVERSE_AUTO = 1400;
 const int SIGNAL_DEADBAND = 20;
 const int IPR_DEADBAND = 20;
 
