@@ -238,6 +238,12 @@ void setup() {
   feedback_msg.actuator_values.size = 2;
   feedback_msg.actuator_values.capacity = 2;
 
+
+  feedback_msg.header.stamp.sec = 0;
+  feedback_msg.header.stamp.nanosec = 0;
+  // frame_id already set/left empty as per A
+
+
   feedback_msg.actuator_names.data = actuator_names_buffer;
   feedback_msg.actuator_names.size = 2;
   feedback_msg.actuator_names.capacity = 2;
@@ -292,6 +298,9 @@ void Rf_control() {
 
   servoA_int = constrain(throttle_pwm + steer_pwm, MAX_REVERSE_AUTO - radius_val, MAX_FORWARD_AUTO + radius_val);
   servoB_int = constrain(throttle_pwm - steer_pwm, MAX_REVERSE_AUTO - radius_val, MAX_FORWARD_AUTO + radius_val);
+  
+  servoA_int = constrain(servoA_int, MAX_REVERSE, MAX_FORWARD);
+  servoB_int = constrain(servoB_int, MAX_REVERSE, MAX_FORWARD);
 
   leftThruster.writeMicroseconds(servoB_int);
   rightThruster.writeMicroseconds(servoA_int);
@@ -305,7 +314,6 @@ void Rf_control() {
 
   // === Publish RF feedback (only if connected) ===
   if (mr_connected) {
-    feedback_msg.header.frame_id.data = "rf_control";
     feedback_msg.actuator_values.data[0] = th_stbd_norm;
     feedback_msg.actuator_values.data[1] = th_port_norm;
     feedback_msg.header.stamp.sec = millis() / 1000;
@@ -382,7 +390,6 @@ void autoControl() {
 
   // Always publish last known (or neutral) values (only if connected)
   if (mr_connected) {
-    feedback_msg.header.frame_id.data = "auto_control";
     feedback_msg.actuator_values.data[0] = th_stbd_norm;
     feedback_msg.actuator_values.data[1] = th_port_norm;
     feedback_msg.header.stamp.sec = millis() / 1000;
