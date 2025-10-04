@@ -115,6 +115,11 @@ int applyDeadband(int value) {
   return value;
 }
 
+inline void ensureServosAttached() {
+  if (!leftThruster.attached())  leftThruster.attach(LEFT_THRUSTER_PIN);
+  if (!rightThruster.attached()) rightThruster.attach(RIGHT_THRUSTER_PIN);
+}
+
 // ================= micro-ROS Callbacks =================
 void actuator_callback(const void * msgin) {
   const interfaces__msg__Actuator * msg = (const interfaces__msg__Actuator *)msgin;
@@ -275,6 +280,8 @@ void Rf_control() {
     heartbeatStage_rf = (heartbeatStage_rf + 1) % 2;
   }
 
+  ensureServosAttached();
+
   int servoA_int = NEUTRAL_SIGNAL;
   int servoB_int = NEUTRAL_SIGNAL;
 
@@ -338,7 +345,9 @@ void autoControl() {
     lastRelayToggle_auto = currentTime;
     heartbeatStage_auto = (heartbeatStage_auto + 1) % 2;
   }
-
+  
+  ensureServosAttached();
+  
   static double th_stbd_norm = 0.0;
   static double th_port_norm = 0.0;
 

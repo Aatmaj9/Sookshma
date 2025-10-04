@@ -6,7 +6,7 @@ RUN apt-get -y install software-properties-common
 RUN add-apt-repository universe
 RUN apt-get update
 RUN apt-get -y install python3-pip python3-serial
-RUN apt-get -y install sudo xauth htop udev zip unzip curl
+RUN apt-get -y install nano gedit sudo xauth htop udev zip unzip curl
 RUN apt-get update --fix-missing
 RUN apt-get -y install libboost-all-dev libasio-dev 
 
@@ -124,7 +124,7 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
         SAM_ARM_PATH="/home/${USERNAME}/.arduino15/packages/per1234/hardware/sam/1.6.11-arm64" && \
         # Patch the platform.txt file
         curl -fsSL https://raw.githubusercontent.com/micro-ROS/micro_ros_arduino/main/extras/patching_boards/platform_arduinocore_sam.txt -o ${SAM_ARM_PATH}/platform.txt && \
-        sed -i 's/-4.8.3-2014q1././g' ${SAM_ARM_PATH}/platform.txt && \
+        sed -i 's/4.8.3-2014q1/7-2017q4/g' ${SAM_ARM_PATH}/platform.txt && \
         # Install basic libraries
         arduino-cli lib install Servo && \
         git clone --depth=1 https://gitlab.com/timwilkinson/FlySkyIBus.git /home/${USERNAME}/Arduino/libraries/FlySkyIBus; \
