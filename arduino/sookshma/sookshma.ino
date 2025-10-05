@@ -13,7 +13,7 @@
 // ================= Pins & Constants =================
 const int LEFT_THRUSTER_PIN = 12;
 const int RIGHT_THRUSTER_PIN = 13;
-const int LED_PIN = 4;
+const int LED_PIN = LED_BUILTIN;
 const int RELAY_PIN = 3;
 
 const int NEUTRAL_SIGNAL = 1500;
