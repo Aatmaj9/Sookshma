@@ -155,7 +155,7 @@ bool create_microros_entities() {
   rc = rclc_subscription_init_default(
         &actuator_sub, &node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(interfaces, msg, Actuator),
-        "actuator_cmd");
+        "sookshma_01/actuator_cmd");
   if (rc != RCL_RET_OK) {
     SerialUSB.print("actuator_sub init failed: "); SerialUSB.println(rc);
     return false;
@@ -173,7 +173,7 @@ bool create_microros_entities() {
   rc = rclc_publisher_init_default(
         &actuator_pub, &node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(interfaces, msg, Actuator),
-        "actuator_feedback");
+        "sookshma_01/actuator_feedback");
   if (rc != RCL_RET_OK) {
     SerialUSB.print("actuator_pub init failed: "); SerialUSB.println(rc);
     return false;
